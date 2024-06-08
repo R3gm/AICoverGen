@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+rvc_models/RectorIA/added_IVF276_Flat_nprobe_1_rectorIA_v2.index filter=lfs diff=lfs merge=lfs -text
+rvc_models/RectorIA/rectorIA.pth filter=lfs diff=lfs merge=lfs -text
