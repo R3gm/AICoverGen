@@ -92,7 +92,17 @@ def raise_exception(error_msg, is_webui):
 def get_rvc_model(voice_model, is_webui):
     rvc_model_filename, rvc_index_filename = None, None
     model_dir = os.path.join(rvc_models_dir, voice_model)
+    print(model_dir)
     for file in os.listdir(model_dir):
+        print(file)
+        if os.path.isdir(file):
+            for ff in os.listdir(file):
+                print("subfile", ff)
+                ext = os.path.splitext(ff)[1]
+                if ext == '.pth':
+                    rvc_model_filename = ff
+                if ext == '.index':
+                    rvc_index_filename = ff
         ext = os.path.splitext(file)[1]
         if ext == '.pth':
             rvc_model_filename = file
