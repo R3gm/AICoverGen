@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+rvc_models/leoadia/added_IVF2387_Flat_nprobe_1_YoungleosiaV2_v2.index filter=lfs diff=lfs merge=lfs -text
+rvc_models/leoadia/YoungleosiaV2.pth filter=lfs diff=lfs merge=lfs -text
