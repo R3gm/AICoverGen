@@ -258,7 +258,7 @@ def run_mdx(model_params, output_dir, model_path, filename, exclude_main=False, 
         device = torch.device("cpu")
         m_threads = 2
         if torch.cuda.is_available():
-            m_threads = 16
+            m_threads = 8
         print(f"threads: {m_threads}")
         processor_num = -1
 
