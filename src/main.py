@@ -64,7 +64,7 @@ def get_youtube_video_id(url, ignore_playlist=True):
     return None
 
 
-def yt_download(link):
+def yt_download(link,cookies):
     ydl_opts = {
         'format': 'bestaudio',
         'outtmpl': '%(title)s',
@@ -73,6 +73,7 @@ def yt_download(link):
         'no_warnings': True,
         'quiet': True,
         'extractaudio': True,
+        'cookiefile': f'{cookies}'
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}],
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
