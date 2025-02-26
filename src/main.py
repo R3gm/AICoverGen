@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import subprocess
+import re
 from contextlib import suppress
 from urllib.parse import urlparse, parse_qs
 
@@ -15,10 +16,10 @@ import librosa
 import numpy as np
 import soundfile as sf
 import sox
-import yt_dlp
+from pytube import YouTube
+from pydub import AudioSegment
 from pedalboard import Pedalboard, Reverb, Compressor, HighpassFilter
 from pedalboard.io import AudioFile
-from pydub import AudioSegment
 
 from mdx import run_mdx
 from rvc import Config, load_hubert, get_vc, rvc_infer
@@ -29,39 +30,46 @@ mdxnet_models_dir = os.path.join(BASE_DIR, 'mdxnet_models')
 rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
 output_dir = os.path.join(BASE_DIR, 'song_output')
 
+def sanitize_filename(filename):
+    # Remove caracteres inválidos para nomes de arquivo
+    return re.sub(r'[\\/*?:"<>|]', "", filename)
 
+def yt_download(link):
+    try:
+        yt = YouTube(link)
+        video = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+        
+        # Sanitiza o título do vídeo para nome de arquivo
+        safe_title = sanitize_filename(yt.title)
+        output_path = f"{safe_title}.mp3"
+        
+        # Baixa o áudio
+        temp_file = video.download(filename_prefix="temp_")
+        
+        # Converte para MP3 usando pydub
+        audio = AudioSegment.from_file(temp_file)
+        audio.export(output_path, format="mp3")
+        
+        # Remove arquivo temporário
+        os.remove(temp_file)
+        
+        return output_path
+        
+    except Exception as e:
+        raise Exception(f"Erro ao baixar o vídeo: {str(e)}")
+
+# ATUALIZE a função get_youtube_video_id para usar pytube
 def get_youtube_video_id(url, ignore_playlist=True):
-    """
-    Examples:
-    http://youtu.be/SA2iWivDJiE
-    http://www.youtube.com/watch?v=_oPAwA_Udwc&feature=feedu
-    http://www.youtube.com/embed/SA2iWivDJiE
-    http://www.youtube.com/v/SA2iWivDJiE?version=3&amp;hl=en_US
-    """
-    if "m.youtube.com" in url:
-        url = url.replace("m.youtube.com", "www.youtube.com")
-    query = urlparse(url)
-    if query.hostname == 'youtu.be':
-        if query.path[1:] == 'watch':
-            return query.query[2:]
-        return query.path[1:]
+    try:
+        yt = YouTube(url)
+        return yt.video_id
+    except:
+        return None
 
-    if query.hostname in {'www.youtube.com', 'youtube.com', 'music.youtube.com'}:
-        if not ignore_playlist:
-            # use case: get playlist id not current video in playlist
-            with suppress(KeyError):
-                return parse_qs(query.query)['list'][0]
-        if query.path == '/watch':
-            return parse_qs(query.query)['v'][0]
-        if query.path[:7] == '/watch/':
-            return query.path.split('/')[1]
-        if query.path[:7] == '/embed/':
-            return query.path.split('/')[2]
-        if query.path[:3] == '/v/':
-            return query.path.split('/')[2]
+# ... (O RESTANTE DO CÓDIGO ORIGINAL PERMANECE IGUAL)
+# ... (MANTENHA TODAS AS OUTRAS FUNÇÕES COMO preprocess_song, voice_change, etc.)
 
-    # returns None for invalid YouTube url
-    return None
+# Modifique APENAS as partes de download do YouTube mostradas acima
 
 
 def yt_download(link):
