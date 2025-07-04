@@ -22,6 +22,9 @@ from pydub import AudioSegment
 
 from mdx import run_mdx
 from rvc import Config, load_hubert, get_vc, rvc_infer
+import logging
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -206,18 +209,24 @@ def get_audio_file(song_input, is_webui, input_type, progress):
         orig_song_path = None
     return keep_orig, orig_song_path
 
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+compute_half = True if torch.cuda.is_available() else False
+config = Config(device, compute_half)
+hubert_model = load_hubert("cuda", config.is_half, os.path.join(rvc_models_dir, 'hubert_base.pt'))
+print(device, "half>>", config.is_half)
 
 # @spaces.GPU(enable_queue=True)
 def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui):
     rvc_model_path, rvc_index_path = get_rvc_model(voice_model, is_webui)
+
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     compute_half = True if torch.cuda.is_available() else False
     config = Config(device, compute_half)
 
-    hubert_model = load_hubert(device, config.is_half, os.path.join(rvc_models_dir, 'hubert_base.pt'))
     cpt, version, net_g, tgt_sr, vc = get_vc(device, config.is_half, config, rvc_model_path)
 
     # convert main vocals
+    global hubert_model
     rvc_infer(rvc_index_path, index_rate, vocals_path, output_path, pitch_change, f0_method, cpt, version, net_g, filter_radius, tgt_sr, rms_mix_rate, protect, crepe_hop_length, vc, hubert_model)
     del hubert_model, cpt
     gc.collect()
@@ -254,12 +263,13 @@ def combine_audio(audio_paths, output_path, main_gain, backup_gain, inst_gain, o
 
 
 # @spaces.GPU(enable_queue=True, duration=130)
-@spaces.GPU(duration=140)
+@spaces.GPU(duration=45)
 def process_song(
     song_dir, song_input, mdx_model_params, song_id, is_webui, input_type, progress,
     keep_files, pitch_change, pitch_change_all, voice_model, index_rate, filter_radius,
     rms_mix_rate, protect, f0_method, crepe_hop_length, output_format, keep_orig, orig_song_path
 ):
+    
     if not os.path.exists(song_dir):
         os.makedirs(song_dir)
         orig_song_path, vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path = preprocess_song(song_input, mdx_model_params, song_id, is_webui, input_type, progress, keep_orig, orig_song_path)
@@ -283,6 +293,7 @@ def process_song(
 
     return ai_vocals_path, ai_cover_path, instrumentals_path, backup_vocals_path, vocals_path, main_vocals_path
 
+# process_song.zerogpu = True
 
 # @spaces.GPU(duration=140)
 def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
@@ -323,6 +334,9 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
         keep_orig, orig_song_path = get_audio_file(song_input, is_webui, input_type, progress)
         orig_song_path = convert_to_stereo(orig_song_path)
 
+        import time
+        start = time.time()
+        
         (
             ai_vocals_path,
             ai_cover_path,
@@ -352,6 +366,12 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
             keep_orig,
             orig_song_path,
         )
+
+        end = time.time()
+        print(f"Execution time: {end - start:.4f} seconds")
+        with sf.SoundFile(ai_vocals_path) as f:
+            duration__ = len(f) / f.samplerate
+        print(f"Audio duration: {duration__:.2f} seconds")
 
         display_progress('[~] Applying audio effects to Vocals...', 0.8, is_webui, progress)
         ai_vocals_mixed_path = add_audio_effects(ai_vocals_path, reverb_rm_size, reverb_wet, reverb_dry, reverb_damping)

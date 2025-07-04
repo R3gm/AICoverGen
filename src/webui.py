@@ -190,14 +190,15 @@ if __name__ == '__main__':
                         rvc_model = gr.Dropdown(voice_models, label='Voice Models', info='Models folder "AICoverGen --> rvc_models". After new models are added into this folder, click the refresh button')
                         ref_btn = gr.Button('Refresh Models 🔁', variant='primary')
 
-                    with gr.Column() as yt_link_col:
+                    with gr.Column(visible=False) as yt_link_col:
                         song_input = gr.Text(label='Song input', info='Link to a song on YouTube or full path to a local file. For file upload, click the button below. Example: https://www.youtube.com/watch?v=M-mtdN6R3bQ')
                         show_file_upload_button = gr.Button('Upload file instead')
 
-                    with gr.Column(visible=False) as file_upload_col:
-                        local_file = gr.File(label='Audio file')
-                        song_input_file = gr.UploadButton('Upload 📂', file_types=['audio'], variant='primary')
-                        show_yt_link_button = gr.Button('Paste YouTube link/Path to local file instead')
+                    with gr.Column(visible=True) as file_upload_col:
+                        audio_extensions = ['.mp3', '.m4a', '.flac', '.wav', '.aac', '.ogg', '.wma', '.alac', '.aiff', '.opus', 'amr']
+                        local_file = gr.File(label='Audio file', interactive=True, type="filepath", file_types=audio_extensions)
+                        song_input_file = gr.UploadButton('Upload 📂', file_types=['audio'], variant='primary', visible=False)
+                        show_yt_link_button = gr.Button('Paste YouTube link/Path to local file instead', visible=False)
                         song_input_file.upload(process_file_upload, inputs=[song_input_file], outputs=[local_file, song_input])
 
                     with gr.Column():
@@ -243,7 +244,7 @@ if __name__ == '__main__':
             ref_btn.click(update_models_list, None, outputs=rvc_model)
             is_webui = gr.Number(value=1, visible=False)
             generate_btn.click(song_cover_pipeline,
-                               inputs=[song_input, rvc_model, pitch, keep_files, is_webui, main_gain, backup_gain,
+                               inputs=[local_file, rvc_model, pitch, keep_files, is_webui, main_gain, backup_gain,
                                        inst_gain, index_rate, filter_radius, rms_mix_rate, f0_method, crepe_hop_length,
                                        protect, pitch_all, reverb_rm_size, reverb_wet, reverb_dry, reverb_damping,
                                        output_format],
