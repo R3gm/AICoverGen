@@ -263,7 +263,7 @@ def combine_audio(audio_paths, output_path, main_gain, backup_gain, inst_gain, o
 
 
 # @spaces.GPU(enable_queue=True, duration=130)
-@spaces.GPU(duration=45)
+@spaces.GPU(duration=50)
 def process_song(
     song_dir, song_input, mdx_model_params, song_id, is_webui, input_type, progress,
     keep_files, pitch_change, pitch_change_all, voice_model, index_rate, filter_radius,
