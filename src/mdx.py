@@ -246,20 +246,19 @@ class MDX:
 
 
 def run_mdx(model_params, output_dir, model_path, filename, exclude_main=False, exclude_inversion=False, suffix=None, invert_suffix=None, denoise=False, keep_orig=True, m_threads=2, base_device="cuda"):
-    
+    vram_gb = 0
+
     if base_device == "cuda" and torch.cuda.is_available():
         device = torch.device("cuda:0")
         device_properties = torch.cuda.get_device_properties(device)
         vram_gb = device_properties.total_memory / 1024**3
         m_threads = 1 if vram_gb < 8 else (8 if vram_gb > 32 else 2)
-        print(f"threads: {m_threads} vram: {vram_gb}")
         processor_num = 0
     else:
         device = torch.device("cpu")
         m_threads = 2
         if torch.cuda.is_available():
             m_threads = 8
-        print(f"threads: {m_threads}")
         processor_num = -1
 
     model_hash = MDX.get_hash(model_path)
@@ -275,6 +274,11 @@ def run_mdx(model_params, output_dir, model_path, filename, exclude_main=False, 
 
     mdx_sess = MDX(model_path, model, processor=processor_num)
     wave, sr = librosa.load(filename, mono=False, sr=44100)
+    duration = librosa.get_duration(y=wave, sr=sr)
+    if duration < 60:
+        m_threads = 1
+    print(f"threads: {m_threads} vram: {vram_gb}")
+
     # normalizing input wave gives better output
     peak = max(np.max(wave), abs(np.min(wave)))
     wave /= peak

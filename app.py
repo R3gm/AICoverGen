@@ -1,12 +1,9 @@
 import os
+import sys
 
-cmd = """
+os.system("python src/download_models.py")
 
-pip install onnxruntime-gpu[cuda,cudnn]==1.22.0
-find / -name 'libcudnn.so*' 2>/dev/null
-
-python src/download_models.py
-python src/webui.py
-"""
+args = " ".join(sys.argv[1:])
+cmd = f"python src/webui.py {args}"
 
 os.system(cmd)

@@ -9,6 +9,8 @@ import shlex
 import subprocess
 from contextlib import suppress
 from urllib.parse import urlparse, parse_qs
+import time
+import shutil
 
 import gradio as gr
 import librosa
@@ -19,6 +21,7 @@ import yt_dlp
 from pedalboard import Pedalboard, Reverb, Compressor, HighpassFilter
 from pedalboard.io import AudioFile
 from pydub import AudioSegment
+import noisereduce as nr
 
 from mdx import run_mdx
 from rvc import Config, load_hubert, get_vc, rvc_infer
@@ -27,10 +30,27 @@ import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+IS_ZERO_GPU = os.getenv("SPACES_ZERO_GPU")
 
 mdxnet_models_dir = os.path.join(BASE_DIR, 'mdxnet_models')
 rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
 output_dir = os.path.join(BASE_DIR, 'song_output')
+
+
+def clean_old_folders(base_path: str, max_age_seconds: int = 10800):
+    if not os.path.isdir(base_path):
+        print(f"Error: {base_path} is not a valid directory.")
+        return
+
+    now = time.time()
+
+    for folder_name in os.listdir(base_path):
+        folder_path = os.path.join(base_path, folder_name)
+        if os.path.isdir(folder_path):
+            last_modified = os.path.getmtime(folder_path)
+            if now - last_modified > max_age_seconds:
+                # print(f"Deleting folder: {folder_path}")
+                shutil.rmtree(folder_path)
 
 
 def get_youtube_video_id(url, ignore_playlist=True):
@@ -68,6 +88,9 @@ def get_youtube_video_id(url, ignore_playlist=True):
 
 
 def yt_download(link):
+    if not link.strip():
+        gr.Info("You need to provide a download link.")
+        return None
     ydl_opts = {
         'format': 'bestaudio',
         'outtmpl': '%(title)s',
@@ -95,12 +118,12 @@ def raise_exception(error_msg, is_webui):
 def get_rvc_model(voice_model, is_webui):
     rvc_model_filename, rvc_index_filename = None, None
     model_dir = os.path.join(rvc_models_dir, voice_model)
-    print(model_dir)
+    # print(model_dir)
     for file in os.listdir(model_dir):
-        print(file)
+        # print(file)
         if os.path.isdir(file):
             for ff in os.listdir(file):
-                print("subfile", ff)
+                # print("subfile", ff)
                 ext = os.path.splitext(ff)[1]
                 if ext == '.pth':
                     rvc_model_filename = ff
@@ -136,7 +159,19 @@ def get_audio_paths(song_dir):
         elif file.endswith('_Vocals_Backup.wav'):
             backup_vocals_path = os.path.join(song_dir, file)
 
+    # print(orig_song_path, instrumentals_path, main_vocals_dereverb_path, backup_vocals_path)
     return orig_song_path, instrumentals_path, main_vocals_dereverb_path, backup_vocals_path
+
+
+def get_audio_with_suffix(song_dir, suffix="_mysuffix.wav"):
+    target_path = None
+
+    for file in os.listdir(song_dir):
+        if file.endswith(suffix):
+            target_path = os.path.join(song_dir, file)
+            break
+
+    return target_path
 
 
 def convert_to_stereo(audio_path):
@@ -216,7 +251,7 @@ hubert_model = load_hubert("cuda", config.is_half, os.path.join(rvc_models_dir, 
 print(device, "half>>", config.is_half)
 
 # @spaces.GPU(enable_queue=True)
-def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui):
+def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui, steps):
     rvc_model_path, rvc_index_path = get_rvc_model(voice_model, is_webui)
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -227,8 +262,8 @@ def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method,
 
     # convert main vocals
     global hubert_model
-    rvc_infer(rvc_index_path, index_rate, vocals_path, output_path, pitch_change, f0_method, cpt, version, net_g, filter_radius, tgt_sr, rms_mix_rate, protect, crepe_hop_length, vc, hubert_model)
-    del hubert_model, cpt
+    rvc_infer(rvc_index_path, index_rate, vocals_path, output_path, pitch_change, f0_method, cpt, version, net_g, filter_radius, tgt_sr, rms_mix_rate, protect, crepe_hop_length, vc, hubert_model, steps)
+    del cpt
     gc.collect()
 
 
@@ -267,9 +302,9 @@ def combine_audio(audio_paths, output_path, main_gain, backup_gain, inst_gain, o
 def process_song(
     song_dir, song_input, mdx_model_params, song_id, is_webui, input_type, progress,
     keep_files, pitch_change, pitch_change_all, voice_model, index_rate, filter_radius,
-    rms_mix_rate, protect, f0_method, crepe_hop_length, output_format, keep_orig, orig_song_path
+    rms_mix_rate, protect, f0_method, crepe_hop_length, output_format, keep_orig, orig_song_path, steps
 ):
-    
+
     if not os.path.exists(song_dir):
         os.makedirs(song_dir)
         orig_song_path, vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path = preprocess_song(song_input, mdx_model_params, song_id, is_webui, input_type, progress, keep_orig, orig_song_path)
@@ -278,29 +313,72 @@ def process_song(
         paths = get_audio_paths(song_dir)
 
         # if any of the audio files aren't available or keep intermediate files, rerun preprocess
-        if any(path is None for path in paths) or keep_files:
+        if any(path is None for path in paths):
             orig_song_path, vocals_path, instrumentals_path, main_vocals_path, backup_vocals_path, main_vocals_dereverb_path = preprocess_song(song_input, mdx_model_params, song_id, is_webui, input_type, progress, keep_orig, orig_song_path)
         else:
             orig_song_path, instrumentals_path, main_vocals_dereverb_path, backup_vocals_path = paths
 
     pitch_change = pitch_change * 12 + pitch_change_all
-    ai_vocals_path = os.path.join(song_dir, f'{os.path.splitext(os.path.basename(orig_song_path))[0]}_{voice_model}_p{pitch_change}_i{index_rate}_fr{filter_radius}_rms{rms_mix_rate}_pro{protect}_{f0_method}{"" if f0_method != "mangio-crepe" else f"_{crepe_hop_length}"}.wav')
+    ai_vocals_path = os.path.join(song_dir, f'{os.path.splitext(os.path.basename(orig_song_path))[0]}_{voice_model}_p{pitch_change}_i{index_rate}_fr{filter_radius}_rms{rms_mix_rate}_pro{protect}_{f0_method}{"" if f0_method != "mangio-crepe" else f"_{crepe_hop_length}"}_s{steps}.wav')
     ai_cover_path = os.path.join(song_dir, f'{os.path.splitext(os.path.basename(orig_song_path))[0]} ({voice_model} Ver).{output_format}')
 
     if not os.path.exists(ai_vocals_path):
         display_progress('[~] Converting voice using RVC...', 0.5, is_webui, progress)
-        voice_change(voice_model, main_vocals_dereverb_path, ai_vocals_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui)
+        voice_change(voice_model, main_vocals_dereverb_path, ai_vocals_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui, steps)
 
     return ai_vocals_path, ai_cover_path, instrumentals_path, backup_vocals_path, vocals_path, main_vocals_path
 
-# process_song.zerogpu = True
+
+def apply_noisereduce(audio_list, type_output="wav"):
+    # https://github.com/sa-if/Audio-Denoiser
+    print("Noice reduce")
+
+    result = []
+    for audio_path in audio_list:
+        out_path = f"{os.path.splitext(audio_path)[0]}_nr.{type_output}"
+
+        try:
+            # Load audio file
+            audio = AudioSegment.from_file(audio_path)
+
+            # Convert audio to numpy array
+            samples = np.array(audio.get_array_of_samples())
+
+            # Reduce noise
+            reduced_noise = nr.reduce_noise(samples, sr=audio.frame_rate, prop_decrease=0.6)
+
+            # Convert reduced noise signal back to audio
+            reduced_audio = AudioSegment(
+                reduced_noise.tobytes(), 
+                frame_rate=audio.frame_rate, 
+                sample_width=audio.sample_width,
+                channels=audio.channels
+            )
+
+            # Save reduced audio to file
+            reduced_audio.export(out_path, format=type_output)
+            result.append(out_path)
+
+        except Exception as e:
+            print(f"Error noisereduce: {str(e)}")
+            result.append(audio_path)
+
+    return result
+
 
 # @spaces.GPU(duration=140)
 def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
                         is_webui=0, main_gain=0, backup_gain=0, inst_gain=0, index_rate=0.5, filter_radius=3,
                         rms_mix_rate=0.25, f0_method='rmvpe', crepe_hop_length=128, protect=0.33, pitch_change_all=0,
                         reverb_rm_size=0.15, reverb_wet=0.2, reverb_dry=0.8, reverb_damping=0.7, output_format='mp3',
+                        extra_denoise=False, steps=1,
                         progress=gr.Progress()):
+    if not keep_files or IS_ZERO_GPU:
+        clean_old_folders("./song_output", 14400)
+
+    if IS_ZERO_GPU:
+        clean_old_folders("./rvc_models", 10800)
+
     try:
         if not song_input or not voice_model:
             raise_exception('Ensure that the song input field and voice model field is filled.', is_webui)
@@ -334,9 +412,8 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
         keep_orig, orig_song_path = get_audio_file(song_input, is_webui, input_type, progress)
         orig_song_path = convert_to_stereo(orig_song_path)
 
-        import time
         start = time.time()
-        
+
         (
             ai_vocals_path,
             ai_cover_path,
@@ -365,6 +442,7 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
             output_format,
             keep_orig,
             orig_song_path,
+            steps,
         )
 
         end = time.time()
@@ -374,20 +452,27 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
         print(f"Audio duration: {duration__:.2f} seconds")
 
         display_progress('[~] Applying audio effects to Vocals...', 0.8, is_webui, progress)
+
+        nr_path = ai_vocals_path  # get_audio_with_suffix(song_dir, "_nr.wav")
+        if extra_denoise:
+            ai_vocals_path = apply_noisereduce([ai_vocals_path])[0]
+
         ai_vocals_mixed_path = add_audio_effects(ai_vocals_path, reverb_rm_size, reverb_wet, reverb_dry, reverb_damping)
 
-        instrumentals_path, _ = run_mdx(
-            mdx_model_params,
-            os.path.join(output_dir, song_id),
-            os.path.join(mdxnet_models_dir, "UVR-MDX-NET-Inst_HQ_4.onnx"),
-            instrumentals_path,
-            # exclude_main=False,
-            exclude_inversion=True,
-            suffix="Voiceless",
-            denoise=False,
-            keep_orig=True,
-            base_device=""
-        )
+        ins_path = get_audio_with_suffix(song_dir, "_Voiceless.wav")
+        if not ins_path:
+            instrumentals_path, _ = run_mdx(
+                mdx_model_params,
+                os.path.join(output_dir, song_id),
+                os.path.join(mdxnet_models_dir, "UVR-MDX-NET-Inst_HQ_4.onnx"),
+                instrumentals_path,
+                # exclude_main=False,
+                exclude_inversion=True,
+                suffix="Voiceless",
+                denoise=False,
+                keep_orig=True,
+                base_device=("" if IS_ZERO_GPU else "cuda")
+            )
         
         if pitch_change_all != 0:
             display_progress('[~] Applying overall pitch change', 0.85, is_webui, progress)
@@ -399,7 +484,7 @@ def song_cover_pipeline(song_input, voice_model, pitch_change, keep_files,
 
         if not keep_files:
             display_progress('[~] Removing intermediate audio files...', 0.95, is_webui, progress)
-            intermediate_files = [vocals_path, main_vocals_path, ai_vocals_mixed_path]
+            intermediate_files = [vocals_path, main_vocals_path, ai_vocals_mixed_path, ins_path, nr_path]
             if pitch_change_all != 0:
                 intermediate_files += [instrumentals_path, backup_vocals_path]
             for file in intermediate_files:
