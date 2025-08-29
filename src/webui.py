@@ -289,6 +289,7 @@ if __name__ == '__main__':
                     if args.builtin_player else
                     gr.File(label="AI Cover", interactive=False)
                 )
+            gr.Markdown("- You can also try `AICoverGen❤️` in Colab’s free tier, which provides free GPU [link](https://github.com/R3gm/AICoverGen?tab=readme-ov-file#aicovergen).")
 
             ref_btn.click(update_models_list, None, outputs=rvc_model)
             is_webui = gr.Number(value=1, visible=False)
