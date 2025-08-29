@@ -55,3 +55,5 @@ Built with ❤️ for music enthusiasts and creators, it allows you to transform
 | **Voice Conversion**      | Replace original vocals with selected AI voice models.                      |
 | **Audio Mixing**          | Fine-tune balance between vocals and instrumentals.                         |
 | **Generate & Download**   | Create your AI cover and download the result as an audio file.               |
+
+👉 This is just a fork of [SociallyIneptWeeb/AICoverGen](https://github.com/SociallyIneptWeeb/AICoverGen), playing around with some changes and improvements.
